@@ -7,3 +7,11 @@
 2018-10-27 18:01:42.390 -04:00 [Information] StopAsync method called.
 2018-10-27 18:01:42.391 -04:00 [Information] OnStopped method called.
 2018-10-27 18:01:42.391 -04:00 [Debug] Hosting stopped
+2018-10-27 19:34:02.856 -04:00 [Debug] Hosting starting
+2018-10-27 19:34:02.898 -04:00 [Information] StartAsync method called.
+2018-10-27 19:34:02.907 -04:00 [Information] OnStarted method called.
+2018-10-27 19:34:02.908 -04:00 [Debug] Hosting started
+2018-10-27 19:35:12.799 -04:00 [Information] OnStopping method called.
+2018-10-27 19:35:12.805 -04:00 [Debug] Hosting stopping
+2018-10-27 19:35:12.806 -04:00 [Information] StopAsync method called.
+2018-10-27 19:35:12.807 -04:00 [Information] OnStopped method called.
