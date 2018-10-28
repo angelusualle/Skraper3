@@ -40,7 +40,7 @@ namespace Skraper3
         {  
             this.logger.LogInformation("OnStarted method called.");  
   
-            // Post-startup code goes here  
+            this.logger.LogInformation("Hey I am new");
         }  
   
         private void OnStopping()  
