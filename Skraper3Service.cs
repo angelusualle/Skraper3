@@ -1,17 +1,21 @@
-using Microsoft.Extensions.Configuration;  
-using Microsoft.Extensions.Hosting;  
-using Microsoft.Extensions.Logging;  
-using System.Threading;  
-using System.Threading.Tasks;  
-  
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace Skraper3 
 {
     public class Skraper3Service : IHostedService  
     {  
-        IApplicationLifetime appLifetime;  
-        ILogger<Skraper3Service> logger;  
-        IHostingEnvironment environment;  
-        IConfiguration configuration;  
+        private IApplicationLifetime appLifetime;  
+        private ILogger<Skraper3Service> logger;  
+        private IHostingEnvironment environment;  
+        private IConfiguration configuration;  
+        private Timer timer;
+
+        private int frequencyInMilliseconds;
         public Skraper3Service(  
             IConfiguration configuration,  
             IHostingEnvironment environment,  
@@ -31,7 +35,11 @@ namespace Skraper3
             this.appLifetime.ApplicationStarted.Register(OnStarted);  
             this.appLifetime.ApplicationStopping.Register(OnStopping);  
             this.appLifetime.ApplicationStopped.Register(OnStopped);  
-  
+
+            //Get configuration from appsettings.json default to 5 second
+            Int32.TryParse(this.configuration["FrequencyInMilliseconds"], out this.frequencyInMilliseconds);
+            if (this.frequencyInMilliseconds <= 0) this.frequencyInMilliseconds = 5000;
+            
             return Task.CompletedTask;  
   
         }  
@@ -39,10 +47,16 @@ namespace Skraper3
         private void OnStarted()  
         {  
             this.logger.LogInformation("OnStarted method called.");  
-  
-            this.logger.LogInformation("Hey I am new");
-        }  
-  
+            this.logger.LogInformation("Timed Background Service is starting.");
+            this.timer = new Timer(DoWork, null, TimeSpan.Zero, 
+                TimeSpan.FromMilliseconds(this.frequencyInMilliseconds));
+        }
+
+        private void DoWork(object state)
+        {
+            
+        }
+
         private void OnStopping()  
         {  
             this.logger.LogInformation("OnStopping method called.");  
