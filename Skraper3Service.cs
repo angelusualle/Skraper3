@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,6 +15,7 @@ namespace Skraper3
         private IHostingEnvironment environment;  
         private IConfiguration configuration;  
         private Timer timer;
+        private readonly HttpClient client;
 
         private int frequencyInMilliseconds;
         public Skraper3Service(  
@@ -26,6 +28,8 @@ namespace Skraper3
             this.logger = logger;  
             this.appLifetime = appLifetime;  
             this.environment = environment;  
+            //Intialize HttpClient we will use
+            this.client = new HttpClient();
         }  
   
         public Task StartAsync(CancellationToken cancellationToken)  
@@ -48,13 +52,28 @@ namespace Skraper3
         {  
             this.logger.LogInformation("OnStarted method called.");  
             this.logger.LogInformation("Timed Background Service is starting.");
-            this.timer = new Timer(DoWork, null, TimeSpan.Zero, 
-                TimeSpan.FromMilliseconds(this.frequencyInMilliseconds));
+            this.timer = new Timer(DoWork, null, 0, -1);
         }
 
-        private void DoWork(object state)
+        private async void DoWork(object state)
         {
+            //TODO: make 15 second default
+            //TODO: Loop through json file with endpoints and emails and make requests async
+            //Send emails + texts, file to loop through in appsettings.json as a config item.
+            //Save last in dictionary
+
+
+
+            var request = new HttpRequestMessage(HttpMethod.Get, 
+                "https://gist.githubusercontent.com/iagox86/4554283/raw/48dac9e2b6ca22f06785b1b49eae11fc81314955/tests.txt");
+            request.Headers.Add("User-Agent", "HttpClientFactory-Sample");
+            HttpResponseMessage response = await client.SendAsync(request);  
+            var responseStr = await response.Content.ReadAsStringAsync();  
+            Console.Write(responseStr);
+
+
             
+            this.timer = new Timer(DoWork, null, this.frequencyInMilliseconds, -1);
         }
 
         private void OnStopping()  
