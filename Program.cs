@@ -24,8 +24,8 @@ namespace Skraper3
                  {  
                      configApp.SetBasePath(Directory.GetCurrentDirectory());  
                      configApp.AddEnvironmentVariables(prefix: "ASPNETCORE_");  
-                     configApp.AddJsonFile($"appsettings.json", true);  
-                     configApp.AddJsonFile($"appsettings.{hostContext.HostingEnvironment.EnvironmentName}.json", true);  
+                     configApp.AddJsonFile($"appsettings.json", true);
+                     configApp.AddJsonFile($"AWSConfig.json", true);
                      configApp.AddCommandLine(args);  
                  })  
                 .ConfigureServices((hostContext, services) =>  

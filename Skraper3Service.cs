@@ -1,10 +1,17 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Amazon.SimpleNotificationService;
+using Amazon.SimpleNotificationService.Model;
+using Amazon;
 
 namespace Skraper3 
 {
@@ -18,6 +25,10 @@ namespace Skraper3
         private readonly HttpClient client;
 
         private int frequencyInMilliseconds;
+        private string SubscriptionsFileAndPath;
+
+        private Dictionary<string, string> previousWebData;
+
         public Skraper3Service(  
             IConfiguration configuration,  
             IHostingEnvironment environment,  
@@ -28,8 +39,8 @@ namespace Skraper3
             this.logger = logger;  
             this.appLifetime = appLifetime;  
             this.environment = environment;  
-            //Intialize HttpClient we will use
             this.client = new HttpClient();
+            this.previousWebData = new Dictionary<string, string>();
         }  
   
         public Task StartAsync(CancellationToken cancellationToken)  
@@ -40,10 +51,10 @@ namespace Skraper3
             this.appLifetime.ApplicationStopping.Register(OnStopping);  
             this.appLifetime.ApplicationStopped.Register(OnStopped);  
 
-            //Get configuration from appsettings.json default to 5 second
+            //Get configuration from appsettings.json default to 15 second
             Int32.TryParse(this.configuration["FrequencyInMilliseconds"], out this.frequencyInMilliseconds);
-            if (this.frequencyInMilliseconds <= 0) this.frequencyInMilliseconds = 5000;
-            
+            if (this.frequencyInMilliseconds <= 0) this.frequencyInMilliseconds = 15000;
+            this.SubscriptionsFileAndPath = this.configuration["SubscriptionsFileAndPath"] ?? "Subscriptions.JSON"; 
             return Task.CompletedTask;  
   
         }  
@@ -57,23 +68,85 @@ namespace Skraper3
 
         private async void DoWork(object state)
         {
-            //TODO: make 15 second default
-            //TODO: Loop through json file with endpoints and emails and make requests async
-            //Send emails + texts, file to loop through in appsettings.json as a config item.
-            //Save last in dictionary
+            List<Subscription> subs = null;
+            //Get all subscriptions
+            try {
+                var jsonStr = System.IO.File.ReadAllText(this.SubscriptionsFileAndPath);
+                subs = JsonConvert.DeserializeObject<List<Subscription>>(jsonStr);
+            }
+            catch (Exception e) {
+                var errormsg = $"Exception In getting subscriptions from {this.SubscriptionsFileAndPath}. Service will stop.";
+                errormsg += $"\n + {e}";
+                this.logger.LogCritical(errormsg);
+                this.appLifetime.StopApplication();
+            }
 
+            //Loop through detect changes
+            await DetectChangesInSubscriptions(subs);
 
+            //Alert users of changes
+            AlertUsersOfChange(subs.Where(s => s.Changed).ToList<Subscription>());
 
-            var request = new HttpRequestMessage(HttpMethod.Get, 
-                "https://gist.githubusercontent.com/iagox86/4554283/raw/48dac9e2b6ca22f06785b1b49eae11fc81314955/tests.txt");
-            request.Headers.Add("User-Agent", "HttpClientFactory-Sample");
-            HttpResponseMessage response = await client.SendAsync(request);  
-            var responseStr = await response.Content.ReadAsStringAsync();  
-            Console.Write(responseStr);
-
-
-            
+            //Set next iteration.
             this.timer = new Timer(DoWork, null, this.frequencyInMilliseconds, -1);
+
+
+        }
+
+        private async void AlertUsersOfChange(List<Subscription> subsToAlert)
+        {
+            try {
+                foreach (var sub in subsToAlert){
+                    //SMS
+                        var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
+                                                    this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
+                        PublishRequest publishRequest = new PublishRequest();
+                        publishRequest.Message = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}";
+                        publishRequest.PhoneNumber = sub.MobileNumber;
+                        await smsClient.PublishAsync(publishRequest);
+                    //Email
+
+                }
+            }
+            catch (Exception e){
+                    var errormsg = $"Exception In sending message. Service will continue.";
+                    errormsg += $"\n + {e}";
+                    this.logger.LogCritical(errormsg);
+                    this.appLifetime.StopApplication();
+            }
+        }
+
+        private async Task DetectChangesInSubscriptions(List<Subscription> subs)
+        {
+            try {
+                foreach (var sub in subs)
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, sub.URL);
+                    request.Headers.Add("User-Agent", "HttpRequestMessage");
+                    sub.response = client.SendAsync(request); 
+                }
+                Task.WaitAll(subs.Select(s => s.response).ToArray());
+                foreach (var sub in subs){
+                    var response = await sub.response;
+                    if ((int)response.StatusCode != 200){
+                        this.logger.LogWarning($"Bad request at {sub.URL} for email {sub.Email}. Will skip this time.");
+                        continue;
+                    }
+                    if (!previousWebData.ContainsKey(sub.URL)){
+                        previousWebData[sub.URL] = await response.Content.ReadAsStringAsync();
+                        continue;
+                    }
+                    var newStr = await response.Content.ReadAsStringAsync();
+                    sub.Changed = (previousWebData[sub.URL] != newStr);
+                    previousWebData[sub.URL] = newStr;
+                }
+            }
+            catch (Exception e){
+                var errormsg = $"Exception In fetching web page. Service will stop.";
+                errormsg += $"\n + {e}";
+                this.logger.LogCritical(errormsg);
+                this.appLifetime.StopApplication();
+            }
         }
 
         private void OnStopping()  
@@ -94,7 +167,6 @@ namespace Skraper3
         public Task StopAsync(CancellationToken cancellationToken)  
         {  
             this.logger.LogInformation("StopAsync method called.");  
-  
             return Task.CompletedTask;  
         }  
     }  
