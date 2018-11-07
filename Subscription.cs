@@ -10,8 +10,6 @@ namespace Skraper3
         public string URL{get;set;}
 
         public bool Changed {get;set;}
-
-        public string Changes {get;set;}
         public Task<HttpResponseMessage> response {get;set;}
     }
 }
