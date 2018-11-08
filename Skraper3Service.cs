@@ -12,6 +12,8 @@ using System.Threading.Tasks;
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
 using Amazon;
+using Amazon.SimpleEmail;
+using Amazon.SimpleEmail.Model;
 
 namespace Skraper3 
 {
@@ -92,30 +94,6 @@ namespace Skraper3
 
 
         }
-
-        private async void AlertUsersOfChange(List<Subscription> subsToAlert)
-        {
-            try {
-                foreach (var sub in subsToAlert){
-                    //SMS
-                        var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
-                                                    this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
-                        PublishRequest publishRequest = new PublishRequest();
-                        publishRequest.Message = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}";
-                        publishRequest.PhoneNumber = sub.MobileNumber;
-                        await smsClient.PublishAsync(publishRequest);
-                    //Email
-
-                }
-            }
-            catch (Exception e){
-                    var errormsg = $"Exception In sending message. Service will continue.";
-                    errormsg += $"\n + {e}";
-                    this.logger.LogCritical(errormsg);
-                    this.appLifetime.StopApplication();
-            }
-        }
-
         private async Task DetectChangesInSubscriptions(List<Subscription> subs)
         {
             try {
@@ -148,6 +126,59 @@ namespace Skraper3
                 this.appLifetime.StopApplication();
             }
         }
+        
+        private async void AlertUsersOfChange(List<Subscription> subsToAlert)
+        {
+            try {
+                foreach (var sub in subsToAlert){
+                    //SMS
+                    var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
+                                                this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
+                    PublishRequest publishRequest = new PublishRequest();
+                    publishRequest.Message = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}";
+                    publishRequest.PhoneNumber = sub.MobileNumber;
+                    await smsClient.PublishAsync(publishRequest);
+                    //Email
+                    using (var client = new AmazonSimpleEmailServiceClient(this.configuration["AWSAccessKey"],
+                                                this.configuration["AWSSecretKey"], RegionEndpoint.USEast1))
+                    {
+                        var sendRequest = new SendEmailRequest
+                        {
+                            Source = "angelusualle@gmail.com",
+                            Destination = new Destination
+                            {
+                                ToAddresses =
+                                new List<string> { sub.Email }
+                            },
+                            Message = new Message
+                            {
+                                Subject = new Content($"Skraper3: The website you asked me to watch changed. See: {sub.URL}"),
+                                Body = new Body
+                                {
+                                    Html = new Content
+                                    {
+                                        Charset = "UTF-8",
+                                        Data = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}"
+                                    },
+                                    Text = new Content
+                                    {
+                                        Charset = "UTF-8",
+                                        Data = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}"
+                                    }
+                                }
+                            }};
+                            await client.SendEmailAsync(sendRequest);
+                        }
+                    }
+            }
+            catch (Exception e){
+                    var errormsg = $"Exception In sending message. Service will continue.";
+                    errormsg += $"\n + {e}";
+                    this.logger.LogCritical(errormsg);
+                    this.appLifetime.StopApplication();
+            }
+        }
+
 
         private void OnStopping()  
         {  
