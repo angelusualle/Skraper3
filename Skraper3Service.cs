@@ -80,6 +80,7 @@ namespace Skraper3
                 var errormsg = $"Exception In getting subscriptions from {this.SubscriptionsFileAndPath}. Service will stop.";
                 errormsg += $"\n + {e}";
                 this.logger.LogCritical(errormsg);
+                await AlertAdminAsync(e);
                 this.appLifetime.StopApplication();
             }
 
@@ -123,6 +124,7 @@ namespace Skraper3
                 var errormsg = $"Exception In fetching web page. Service will stop.";
                 errormsg += $"\n + {e}";
                 this.logger.LogCritical(errormsg);
+                await AlertAdminAsync(e);
                 this.appLifetime.StopApplication();
             }
         }
@@ -175,10 +177,27 @@ namespace Skraper3
                     var errormsg = $"Exception In sending message. Service will continue.";
                     errormsg += $"\n + {e}";
                     this.logger.LogCritical(errormsg);
+                    await this.AlertAdminAsync(e);
                     this.appLifetime.StopApplication();
             }
         }
 
+        private async Task AlertAdminAsync(Exception e)
+        {
+            try {
+                //SMS
+                var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
+                                            this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
+                PublishRequest publishRequest = new PublishRequest();
+                publishRequest.Message = $"Skraper3: I stopped, heres what happened:{e}";
+                publishRequest.PhoneNumber = this.configuration["AdminPhoneNumber"];
+                await smsClient.PublishAsync(publishRequest);
+            }
+            catch{
+                //nothing if cant cry for help
+
+            }
+        }
 
         private void OnStopping()  
         {  
