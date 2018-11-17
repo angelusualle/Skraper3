@@ -80,7 +80,7 @@ namespace Skraper3
                 var errormsg = $"Exception In getting subscriptions from {this.SubscriptionsFileAndPath}. Service will stop.";
                 errormsg += $"\n + {e}";
                 this.logger.LogCritical(errormsg);
-                await AlertAdminAsync(e);
+                await AlertAdminAsync(e.ToString());
                 this.appLifetime.StopApplication();
             }
 
@@ -100,96 +100,118 @@ namespace Skraper3
             try {
                 foreach (var sub in subs)
                 {
-                    var request = new HttpRequestMessage(HttpMethod.Get, sub.URL);
-                    request.Headers.Add("User-Agent", "HttpRequestMessage");
-                    sub.response = client.SendAsync(request); 
+                    HttpClient client = new HttpClient();
+                    sub.response = client.GetAsync(sub.URL);
                 }
-                Task.WaitAll(subs.Select(s => s.response).ToArray());
                 foreach (var sub in subs){
-                    var response = await sub.response;
-                    if ((int)response.StatusCode != 200){
-                        this.logger.LogWarning($"Bad request at {sub.URL} for email {sub.Email}. Will skip this time.");
-                        continue;
+                    try {
+                        var response = await sub.response;
+                        if ((int)response.StatusCode != 200){
+                            this.logger.LogWarning($"Bad request at {sub.URL} for email {sub.Email}. Will skip this time.");
+                            continue;
+                        }
+                        if (!previousWebData.ContainsKey(sub.URL)){
+                            previousWebData[sub.URL] = await response.Content.ReadAsStringAsync();
+                            continue;
+                        }
+                        var newStr = await response.Content.ReadAsStringAsync();
+                        sub.Changed = (previousWebData[sub.URL] != newStr);
+                        previousWebData[sub.URL] = newStr;
+                        sub.NumberOfErrors = 0;
                     }
-                    if (!previousWebData.ContainsKey(sub.URL)){
-                        previousWebData[sub.URL] = await response.Content.ReadAsStringAsync();
-                        continue;
+                    catch (Exception e){
+                        ++sub.NumberOfErrors;
+                        if (sub.NumberOfErrors > 5){ //5 failures remove subscription and alert users
+                            RemoveSubscription(sub, subs);
+                            await AlertUserOfCancel(sub);
+                        }
                     }
-                    var newStr = await response.Content.ReadAsStringAsync();
-                    sub.Changed = (previousWebData[sub.URL] != newStr);
-                    previousWebData[sub.URL] = newStr;
                 }
             }
             catch (Exception e){
-                var errormsg = $"Exception In fetching web page. Service will stop.";
+                var errormsg = $"Exception In processing. Service will stop.";
                 errormsg += $"\n + {e}";
                 this.logger.LogCritical(errormsg);
-                await AlertAdminAsync(e);
+                await AlertAdminAsync(e.ToString());
                 this.appLifetime.StopApplication();
             }
         }
-        
+
+        private void RemoveSubscription(Subscription sub, List<Subscription> subs)
+        {
+            subs.Remove(sub);
+            File.WriteAllText(".\\Subscriptions.Json", JsonConvert.SerializeObject(subs));
+        }
+
         private async void AlertUsersOfChange(List<Subscription> subsToAlert)
         {
             try {
                 foreach (var sub in subsToAlert){
-                    //SMS
-                    var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
-                                                this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
-                    PublishRequest publishRequest = new PublishRequest();
-                    publishRequest.Message = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}";
-                    publishRequest.PhoneNumber = sub.MobileNumber;
-                    await smsClient.PublishAsync(publishRequest);
-                    //Email
-                    using (var client = new AmazonSimpleEmailServiceClient(this.configuration["AWSAccessKey"],
-                                                this.configuration["AWSSecretKey"], RegionEndpoint.USEast1))
-                    {
-                        var sendRequest = new SendEmailRequest
-                        {
-                            Source = "angelusualle@gmail.com",
-                            Destination = new Destination
-                            {
-                                ToAddresses =
-                                new List<string> { sub.Email }
-                            },
-                            Message = new Message
-                            {
-                                Subject = new Content($"Skraper3: The website you asked me to watch changed. See: {sub.URL}"),
-                                Body = new Body
-                                {
-                                    Html = new Content
-                                    {
-                                        Charset = "UTF-8",
-                                        Data = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}"
-                                    },
-                                    Text = new Content
-                                    {
-                                        Charset = "UTF-8",
-                                        Data = $"Skraper3: The website you asked me to watch changed. See: {sub.URL}"
-                                    }
-                                }
-                            }};
-                            await client.SendEmailAsync(sendRequest);
-                        }
-                    }
+                    await SendEmailAndText($"Skraper3: The website you asked me to watch changed. See: {sub.URL}", sub);
+                }
             }
             catch (Exception e){
                     var errormsg = $"Exception In sending message. Service will continue.";
                     errormsg += $"\n + {e}";
                     this.logger.LogCritical(errormsg);
-                    await this.AlertAdminAsync(e);
+                    await this.AlertAdminAsync(e.ToString());
                     this.appLifetime.StopApplication();
             }
         }
 
-        private async Task AlertAdminAsync(Exception e)
+        private async Task AlertUserOfCancel(Subscription sub){
+            await SendEmailAndText($"Skraper3: The website you asked me to errored out too many times. URL: {sub.URL}", sub);
+        }
+
+        private async Task SendEmailAndText(string message, Subscription sub){
+            //SMS
+            var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
+                                        this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
+            PublishRequest publishRequest = new PublishRequest();
+            publishRequest.Message = message;
+            publishRequest.PhoneNumber = sub.MobileNumber;
+            await smsClient.PublishAsync(publishRequest);
+            //Email
+            using (var client = new AmazonSimpleEmailServiceClient(this.configuration["AWSAccessKey"],
+                                        this.configuration["AWSSecretKey"], RegionEndpoint.USEast1))
+            {
+                var sendRequest = new SendEmailRequest
+                {
+                    Source = "angelusualle@gmail.com",
+                    Destination = new Destination
+                    {
+                        ToAddresses =
+                        new List<string> { sub.Email }
+                    },
+                    Message = new Message
+                    {
+                        Subject = new Content(message),
+                        Body = new Body
+                        {
+                            Html = new Content
+                            {
+                                Charset = "UTF-8",
+                                Data = message
+                            },
+                            Text = new Content
+                            {
+                                Charset = "UTF-8",
+                                Data = message
+                            }
+                        }
+                }};
+                await client.SendEmailAsync(sendRequest);
+            }
+        }
+
+        private async Task AlertAdminAsync(string errmsg)
         {
             try {
                 //SMS
                 var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
                                             this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
                 PublishRequest publishRequest = new PublishRequest();
-                publishRequest.Message = $"Skraper3: I stopped, heres what happened:{e}";
+                publishRequest.Message = $"Skraper3: I stopped, heres what happened: {errmsg}";
                 publishRequest.PhoneNumber = this.configuration["AdminPhoneNumber"];
                 await smsClient.PublishAsync(publishRequest);
             }
@@ -210,7 +232,7 @@ namespace Skraper3
         {  
             this.logger.LogInformation("OnStopped method called.");  
   
-            // Post-stopped code goes here  
+            AlertAdminAsync("Stopped gracefully").GetAwaiter().GetResult();
         }  
   
   

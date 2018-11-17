@@ -11,5 +11,7 @@ namespace Skraper3
 
         public bool Changed {get;set;}
         public Task<HttpResponseMessage> response {get;set;}
+
+        public int NumberOfErrors {get;set;} = 0;
     }
 }
