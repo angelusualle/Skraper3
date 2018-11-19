@@ -14,6 +14,7 @@ using Amazon.SimpleNotificationService.Model;
 using Amazon;
 using Amazon.SimpleEmail;
 using Amazon.SimpleEmail.Model;
+using HtmlAgilityPack;
 
 namespace Skraper3 
 {
@@ -111,10 +112,13 @@ namespace Skraper3
                             continue;
                         }
                         if (!previousWebData.ContainsKey(sub.URL)){
-                            previousWebData[sub.URL] = await response.Content.ReadAsStringAsync();
+                            var baseStr = await response.Content.ReadAsStringAsync();
+                            var webdata = getWebdataFromSub(baseStr, sub);
+                            previousWebData[sub.URL] = webdata;
                             continue;
                         }
-                        var newStr = await response.Content.ReadAsStringAsync();
+                        var newWebResponse = await response.Content.ReadAsStringAsync();
+                        var newStr = getWebdataFromSub(newWebResponse, sub);
                         sub.Changed = (previousWebData[sub.URL] != newStr);
                         previousWebData[sub.URL] = newStr;
                         sub.NumberOfErrors = 0;
@@ -137,6 +141,17 @@ namespace Skraper3
             }
         }
 
+        private string getWebdataFromSub(string baseStr, Subscription sub)
+        {
+            var webdata = baseStr;
+            if (sub?.XPath != ""){
+                var dom = new HtmlDocument();
+                dom.LoadHtml(baseStr);
+                webdata = dom.DocumentNode.SelectSingleNode(sub.XPath).InnerText;
+            }
+            return webdata;
+        }
+
         private void RemoveSubscription(Subscription sub, List<Subscription> subs)
         {
             subs.Remove(sub);
@@ -147,7 +162,8 @@ namespace Skraper3
         {
             try {
                 foreach (var sub in subsToAlert){
-                    await SendEmailAndText($"Skraper3: The website you asked me to watch changed. See: {sub.URL}", sub);
+                    var changes = previousWebData[sub.URL];
+                    await SendEmailAndText($"Skraper3: The website you asked me to watch changed. To:{changes}  \nOriginal Site:{sub.URL}", sub);
                 }
             }
             catch (Exception e){
@@ -160,7 +176,7 @@ namespace Skraper3
         }
 
         private async Task AlertUserOfCancel(Subscription sub){
-            await SendEmailAndText($"Skraper3: The website you asked me to errored out too many times. URL: {sub.URL}", sub);
+            await SendEmailAndText($"Skraper3: The website you asked me to look at errored out too many times. URL: {sub.URL}", sub);
         }
 
         private async Task SendEmailAndText(string message, Subscription sub){
