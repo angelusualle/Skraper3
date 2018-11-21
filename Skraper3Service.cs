@@ -29,7 +29,6 @@ namespace Skraper3
         private readonly HttpClient client;
 
         private int frequencyInMilliseconds;
-        private string SubscriptionsFileAndPath;
 
         private Dictionary<string, string> previousWebData;
 
