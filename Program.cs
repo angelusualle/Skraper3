@@ -4,9 +4,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;  
 using Microsoft.Extensions.DependencyInjection;  
 using Microsoft.Extensions.Hosting;  
-using Microsoft.Extensions.Logging;  
+using Microsoft.Extensions.Logging;
 using Serilog;  
-  
+using Microsoft.EntityFrameworkCore.Sqlite;
+using Microsoft.EntityFrameworkCore;
+
 namespace Skraper3 
 {  
     class Program  
@@ -32,6 +34,9 @@ namespace Skraper3
                 {  
                     services.AddLogging();  
                     services.AddHostedService<Skraper3Service>();  
+                    var dataSrc = hostContext.Configuration["DBFilePath"];
+                    services.AddDbContext<SubscriptionsContext>(options =>
+                        options.UseSqlite($"Data Source={dataSrc}"));
                 })  
                 .ConfigureLogging((hostContext, configLogging) =>  
                 {  

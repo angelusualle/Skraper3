@@ -15,6 +15,7 @@ using Amazon;
 using Amazon.SimpleEmail;
 using Amazon.SimpleEmail.Model;
 using HtmlAgilityPack;
+using Microsoft.EntityFrameworkCore;
 
 namespace Skraper3 
 {
@@ -32,11 +33,14 @@ namespace Skraper3
 
         private Dictionary<string, string> previousWebData;
 
+        private SubscriptionsContext context; 
+
         public Skraper3Service(  
             IConfiguration configuration,  
             IHostingEnvironment environment,  
             ILogger<Skraper3Service> logger,   
-            IApplicationLifetime appLifetime)  
+            IApplicationLifetime appLifetime,
+            SubscriptionsContext context)  
         {  
             this.configuration = configuration;  
             this.logger = logger;  
@@ -44,6 +48,7 @@ namespace Skraper3
             this.environment = environment;  
             this.client = new HttpClient();
             this.previousWebData = new Dictionary<string, string>();
+            this.context = context;
         }  
   
         public Task StartAsync(CancellationToken cancellationToken)  
@@ -56,8 +61,7 @@ namespace Skraper3
 
             //Get configuration from appsettings.json default to 15 second
             Int32.TryParse(this.configuration["FrequencyInMilliseconds"], out this.frequencyInMilliseconds);
-            if (this.frequencyInMilliseconds <= 0) this.frequencyInMilliseconds = 15000;
-            this.SubscriptionsFileAndPath = this.configuration["SubscriptionsFileAndPath"] ?? "Subscriptions.JSON"; 
+            if (this.frequencyInMilliseconds <= 0) this.frequencyInMilliseconds = 15000; 
             return Task.CompletedTask;  
   
         }  
@@ -71,14 +75,13 @@ namespace Skraper3
 
         private async void DoWork(object state)
         {
-            List<Subscription> subs = null;
+            List<Subscriptions> subs = null;
             //Get all subscriptions
             try {
-                var jsonStr = System.IO.File.ReadAllText(this.SubscriptionsFileAndPath);
-                subs = JsonConvert.DeserializeObject<List<Subscription>>(jsonStr);
+                subs = await context.Subscriptions.ToListAsync();
             }
             catch (Exception e) {
-                var errormsg = $"Exception In getting subscriptions from {this.SubscriptionsFileAndPath}. Service will stop.";
+                var errormsg = $"Exception In getting subscriptions from Database. Service will stop.";
                 errormsg += $"\n + {e}";
                 this.logger.LogCritical(errormsg);
                 await AlertAdminAsync(e.ToString());
@@ -89,46 +92,46 @@ namespace Skraper3
             await DetectChangesInSubscriptions(subs);
 
             //Alert users of changes
-            AlertUsersOfChange(subs.Where(s => s.Changed).ToList<Subscription>());
+            AlertUsersOfChange(subs.Where(s => s.Changed == 1).ToList());
 
             //Set next iteration.
             this.timer = new Timer(DoWork, null, this.frequencyInMilliseconds, -1);
 
 
         }
-        private async Task DetectChangesInSubscriptions(List<Subscription> subs)
+        private async Task DetectChangesInSubscriptions(List<Subscriptions> subs)
         {
             try {
                 foreach (var sub in subs)
                 {
                     HttpClient client = new HttpClient();
-                    sub.response = client.GetAsync(sub.URL);
-                }
-                foreach (var sub in subs){
                     try {
-                        var response = await sub.response;
+                        var response = await client.GetAsync(sub.Url);
                         if ((int)response.StatusCode != 200){
-                            this.logger.LogWarning($"Bad request at {sub.URL} for email {sub.Email}. Will skip this time.");
+                            this.logger.LogWarning($"Bad request at {sub.Url} for email {sub.Email}. Will skip this time.");
                             continue;
                         }
-                        if (!previousWebData.ContainsKey(sub.URL)){
+                        if (!previousWebData.ContainsKey(sub.Url)){
                             var baseStr = await response.Content.ReadAsStringAsync();
                             var webdata = getWebdataFromSub(baseStr, sub);
-                            previousWebData[sub.URL] = webdata;
+                            previousWebData[sub.Url] = webdata;
+                            sub.Changed = 0;
                             continue;
                         }
                         var newWebResponse = await response.Content.ReadAsStringAsync();
                         var newStr = getWebdataFromSub(newWebResponse, sub);
-                        sub.Changed = (previousWebData[sub.URL] != newStr);
-                        previousWebData[sub.URL] = newStr;
+                        sub.Changed = (previousWebData[sub.Url] != newStr) ? 1:0;
+                        previousWebData[sub.Url] = newStr;
                         sub.NumberOfErrors = 0;
                     }
                     catch (Exception e){
+                        if (sub.NumberOfErrors == 0 ) sub.NumberOfErrors = 0;
                         ++sub.NumberOfErrors;
-                        if (sub.NumberOfErrors > 5){ //5 failures remove subscription and alert users
-                            RemoveSubscription(sub, subs);
+                        if (sub.NumberOfErrors > 5){
+                            RemoveSubscription(sub);
                             await AlertUserOfCancel(sub);
                         }
+                        sub.Changed = 0;
                     }
                 }
             }
@@ -139,31 +142,33 @@ namespace Skraper3
                 await AlertAdminAsync(e.ToString());
                 this.appLifetime.StopApplication();
             }
+            finally{
+                await context.SaveChangesAsync();
+            }
         }
 
-        private string getWebdataFromSub(string baseStr, Subscription sub)
+        private string getWebdataFromSub(string baseStr, Subscriptions sub)
         {
             var webdata = baseStr;
-            if (sub?.XPath != ""){
+            if (sub?.Xpath != ""){
                 var dom = new HtmlDocument();
                 dom.LoadHtml(baseStr);
-                webdata = dom.DocumentNode.SelectSingleNode(sub.XPath).InnerText;
+                webdata = dom.DocumentNode.SelectSingleNode(sub.Xpath).InnerText;
             }
             return webdata;
         }
 
-        private void RemoveSubscription(Subscription sub, List<Subscription> subs)
+        private void RemoveSubscription(Subscriptions sub)
         {
-            subs.Remove(sub);
-            File.WriteAllText(".\\Subscriptions.Json", JsonConvert.SerializeObject(subs));
+            context.Subscriptions.Remove(sub);
         }
 
-        private async void AlertUsersOfChange(List<Subscription> subsToAlert)
+        private async void AlertUsersOfChange(List<Subscriptions> subsToAlert)
         {
             try {
                 foreach (var sub in subsToAlert){
-                    var changes = previousWebData[sub.URL];
-                    await SendEmailAndText($"Skraper3: The website you asked me to watch changed. To:{changes}  \nOriginal Site:{sub.URL}", sub);
+                    var changes = previousWebData[sub.Url];
+                    await SendEmailAndText($"Skraper3: The website you asked me to watch changed. To:{changes}  \nOriginal Site:{sub.Url}", sub);
                 }
             }
             catch (Exception e){
@@ -175,25 +180,27 @@ namespace Skraper3
             }
         }
 
-        private async Task AlertUserOfCancel(Subscription sub){
-            await SendEmailAndText($"Skraper3: The website you asked me to look at errored out too many times. URL: {sub.URL}", sub);
+        private async Task AlertUserOfCancel(Subscriptions sub){
+            await SendEmailAndText($"Skraper3: The website you asked me to look at errored out too many times. URL: {sub.Url}", sub);
         }
 
-        private async Task SendEmailAndText(string message, Subscription sub){
-            //SMS
-            var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
-                                        this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
-            PublishRequest publishRequest = new PublishRequest();
-            publishRequest.Message = message;
-            publishRequest.PhoneNumber = sub.MobileNumber;
-            await smsClient.PublishAsync(publishRequest);
+        private async Task SendEmailAndText(string message, Subscriptions sub){
+            if (sub.MobileNumber != null){
+                //SMS
+                var smsClient = new AmazonSimpleNotificationServiceClient(this.configuration["AWSAccessKey"],
+                                            this.configuration["AWSSecretKey"], RegionEndpoint.USEast1);
+                PublishRequest publishRequest = new PublishRequest();
+                publishRequest.Message = message;
+                publishRequest.PhoneNumber = sub.MobileNumber;
+                await smsClient.PublishAsync(publishRequest);
+            }
             //Email
             using (var client = new AmazonSimpleEmailServiceClient(this.configuration["AWSAccessKey"],
                                         this.configuration["AWSSecretKey"], RegionEndpoint.USEast1))
             {
                 var sendRequest = new SendEmailRequest
                 {
-                    Source = "angelusualle@gmail.com",
+                    Source = "skraper3@outlook.com",
                     Destination = new Destination
                     {
                         ToAddresses =
@@ -201,7 +208,7 @@ namespace Skraper3
                     },
                     Message = new Message
                     {
-                        Subject = new Content(message),
+                        Subject = new Content("Skraper3"),
                         Body = new Body
                         {
                             Html = new Content
