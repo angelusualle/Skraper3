@@ -253,8 +253,6 @@ namespace Skraper3
         private void OnStopped()  
         {  
             this.logger.LogInformation("OnStopped method called.");  
-  
-            AlertAdminAsync("Stopped gracefully").GetAwaiter().GetResult();
         }  
   
   
