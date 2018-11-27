@@ -124,7 +124,6 @@ namespace Skraper3
                         sub.NumberOfErrors = 0;
                     }
                     catch (Exception e){
-                        if (sub.NumberOfErrors == 0 ) sub.NumberOfErrors = 0;
                         ++sub.NumberOfErrors;
                         if (sub.NumberOfErrors > 5){
                             RemoveSubscription(sub);
